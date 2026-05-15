@@ -878,9 +878,11 @@ async function initAuth() {
   try {
     msalInstance = new msal.PublicClientApplication(msalConfig);
     await msalInstance.initialize();
+    showLoading('Verificando sesión...');
     const response = await msalInstance.handleRedirectPromise();
-    if (response) currentAccount = response.account;
-    else {
+    if (response) {
+      currentAccount = response.account;
+    } else {
       const accounts = msalInstance.getAllAccounts();
       if (accounts.length > 0) currentAccount = accounts[0];
     }
@@ -889,31 +891,21 @@ async function initAuth() {
   } catch (e) {
     console.error('Auth init error:', e);
     showBanner('Error al inicializar Microsoft Auth: ' + e.message);
-  }
-}
-
-async function signIn() {
-  try {
-    showLoading('Iniciando sesión...');
-    const result = await msalInstance.loginPopup({ scopes: SCOPES, prompt: 'select_account' });
-    currentAccount = result.account;
-    updateAuthUI();
-    await onSignedIn();
-  } catch (e) {
-    if (e.errorCode !== 'user_cancelled') showBanner('Error al iniciar sesión: ' + (e.message || e));
   } finally {
     hideLoading();
   }
 }
 
+async function signIn() {
+  try {
+    await msalInstance.loginRedirect({ scopes: SCOPES, prompt: 'select_account' });
+  } catch (e) {
+    showBanner('Error al iniciar sesión: ' + (e.message || e));
+  }
+}
+
 function signOut() {
-  msalInstance.logoutPopup({ account: currentAccount }).then(() => {
-    currentAccount = null;
-    spSiteId = null;
-    listUsuarios = []; listEventos = []; invoices = [];
-    updateAuthUI();
-    hideBanner();
-  });
+  msalInstance.logoutRedirect({ account: currentAccount });
 }
 
 async function getToken() {
@@ -922,7 +914,7 @@ async function getToken() {
     const r = await msalInstance.acquireTokenSilent({ scopes: SCOPES, account: currentAccount });
     return r.accessToken;
   } catch {
-    const r = await msalInstance.acquireTokenPopup({ scopes: SCOPES, account: currentAccount });
+    const r = await msalInstance.acquireTokenRedirect({ scopes: SCOPES, account: currentAccount });
     return r.accessToken;
   }
 }
