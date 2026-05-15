@@ -1397,11 +1397,14 @@ function exportExcel() {
 }
 
 // ─── API Key ─────────────────────────────────────────────────
-function getApiKey()  { return localStorage.getItem('pt_apikey') || ''; }
+function storageSet(k, v) { try { localStorage.setItem(k, v); } catch { try { sessionStorage.setItem(k, v); } catch {} } }
+function storageGet(k)    { try { return localStorage.getItem(k) || sessionStorage.getItem(k) || ''; } catch { try { return sessionStorage.getItem(k) || ''; } catch { return ''; } } }
+
+function getApiKey()  { return storageGet('pt_apikey'); }
 function saveApiKey() {
   const val = document.getElementById('apiKeyInput').value.trim();
   if (!val) return alert('Ingresa una API key válida.');
-  localStorage.setItem('pt_apikey', val);
+  storageSet('pt_apikey', val);
   updateApiKeyUI(); closeModal();
 }
 function updateApiKeyUI() {
