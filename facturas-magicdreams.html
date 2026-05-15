@@ -818,7 +818,7 @@ const msalConfig = {
   auth: {
     clientId: CLIENT_ID,
     authority: `https://login.microsoftonline.com/${TENANT_ID}`,
-    redirectUri: (location.protocol === 'file:') ? 'http://localhost:8080/facturas-magicdreams.html' : (window.location.origin + window.location.pathname),
+    redirectUri: 'https://registro-de-facturas-md.vercel.app/facturas-magicdreams.html',
     navigateToLoginRequestUrl: false
   },
   cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: false }
