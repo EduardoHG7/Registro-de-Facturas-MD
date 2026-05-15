@@ -1,0 +1,1429 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Extractor de Facturas — Magic Dreams</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
+<style>
+  :root {
+    --bg: #f8f9fc;
+    --bg2: #ffffff;
+    --bg3: #f1f3f8;
+    --border: rgba(0,0,0,0.07);
+    --border2: rgba(0,0,0,0.12);
+    --text: #1a1d26;
+    --text2: #5a6075;
+    --text3: #9ba3b8;
+    --accent: #4f9cf9;
+    --accent-glow: rgba(79,156,249,0.10);
+    --green: #059669;
+    --green-bg: rgba(5,150,105,0.08);
+    --amber: #d97706;
+    --amber-bg: rgba(217,119,6,0.08);
+    --red: #dc2626;
+    --red-bg: rgba(220,38,38,0.07);
+    --blue-bg: rgba(79,156,249,0.07);
+    --ms-blue: #0078d4;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --shadow: 0 8px 32px rgba(0,0,0,0.10);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 2rem 4rem;
+  }
+
+  /* ── Topbar ── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 2rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 3rem;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(248,249,252,0.95);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    margin-left: -2rem;
+    margin-right: -2rem;
+  }
+
+  .logo img { height: 40px; width: auto; display: block; }
+
+  .topbar-right { display: flex; align-items: center; gap: 10px; }
+
+  /* Microsoft login button */
+  .btn-ms-login {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--ms-blue); color: #fff;
+    border: none; border-radius: var(--radius-sm);
+    padding: 8px 16px; font-size: 13px; font-weight: 500;
+    font-family: 'Outfit', sans-serif;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .btn-ms-login:hover { background: #106ebe; }
+  .btn-ms-login svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+  /* User chip */
+  .user-chip {
+    display: none; align-items: center; gap: 8px;
+    background: var(--bg3); border: 1px solid var(--border2);
+    border-radius: 999px; padding: 5px 12px 5px 6px;
+  }
+
+  .user-avatar {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--ms-blue); color: #fff;
+    font-size: 11px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; text-transform: uppercase;
+  }
+
+  .user-name { font-size: 13px; font-weight: 500; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .btn-signout {
+    background: none; border: none; color: var(--text3);
+    cursor: pointer; font-size: 13px; padding: 2px 4px;
+    border-radius: 4px; line-height: 1; transition: all 0.15s;
+  }
+  .btn-signout:hover { color: var(--red); }
+
+  /* API Key toggle */
+  .api-toggle {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 999px; padding: 6px 14px;
+    cursor: pointer; font-size: 12px; color: var(--text2);
+    transition: all 0.2s;
+  }
+  .api-toggle:hover { border-color: var(--border2); color: var(--text); }
+  .api-toggle .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
+  .api-toggle .dot.connected { background: var(--green); }
+
+  /* ── Loading overlay ── */
+  .loading-overlay {
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(248,249,252,0.85);
+    backdrop-filter: blur(4px);
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+  }
+  .loading-overlay.show { display: flex; }
+
+  .spinner-ring {
+    width: 40px; height: 40px;
+    border: 3px solid var(--border2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  .loading-msg { font-size: 14px; color: var(--text2); }
+
+  /* ── SP status banner ── */
+  .sp-banner {
+    display: none; align-items: center; gap: 8px;
+    padding: 10px 16px; border-radius: var(--radius-sm);
+    font-size: 13px; margin-bottom: 1.5rem;
+  }
+  .sp-banner.show { display: flex; }
+  .sp-banner.error { background: var(--red-bg); color: var(--red); border: 1px solid rgba(220,38,38,0.2); }
+  .sp-banner.info  { background: var(--blue-bg); color: var(--accent); border: 1px solid rgba(79,156,249,0.2); }
+  .sp-banner svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+  /* ── Hero ── */
+  .hero { text-align: center; margin-bottom: 2.5rem; }
+
+  .hero h1 {
+    font-family: 'DM Serif Display', serif;
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    font-weight: 400; line-height: 1.1; margin-bottom: 1rem;
+    background: linear-gradient(135deg, #1a1d26 0%, #5a6075 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .hero h1 em {
+    font-style: italic;
+    background: linear-gradient(135deg, #4f9cf9 0%, #a78bfa 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .hero p { font-size: 16px; color: var(--text2); font-weight: 300; max-width: 500px; margin: 0 auto; line-height: 1.6; }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.4); backdrop-filter: blur(6px);
+    z-index: 100; display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  }
+  .modal-overlay.open { opacity: 1; pointer-events: all; }
+
+  .modal {
+    background: var(--bg2); border: 1px solid var(--border2);
+    border-radius: 20px; padding: 2rem; width: 90%; max-width: 480px;
+    box-shadow: var(--shadow); transform: translateY(20px); transition: transform 0.2s;
+  }
+  .modal-overlay.open .modal { transform: translateY(0); }
+  .modal h2 { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+  .modal p  { font-size: 13px; color: var(--text2); margin-bottom: 1.5rem; line-height: 1.5; }
+  .modal label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 6px; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; }
+  .modal input {
+    width: 100%; background: var(--bg3); border: 1px solid var(--border2);
+    border-radius: var(--radius-sm); padding: 10px 14px; color: var(--text);
+    font-family: 'DM Mono', monospace; font-size: 13px; outline: none;
+    transition: border-color 0.2s; margin-bottom: 1rem;
+  }
+  .modal input:focus { border-color: var(--accent); }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* ── Context Section ── */
+  .context-section { margin-bottom: 2rem; }
+
+  .context-card {
+    background: var(--bg2); border: 1px solid var(--border2);
+    border-radius: 16px; overflow: hidden;
+  }
+
+  .context-main {
+    display: flex; align-items: center; gap: 1rem;
+    padding: 1.25rem 1.5rem; flex-wrap: wrap;
+  }
+
+  .context-label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--text3); flex-shrink: 0;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .context-label svg { width: 13px; height: 13px; }
+
+  .ctx-fields { display: flex; gap: 10px; flex: 1; flex-wrap: wrap; }
+
+  .ctx-field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 160px; }
+  .ctx-field label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); }
+
+  .ctx-select-wrap { position: relative; }
+  .ctx-select-wrap select {
+    width: 100%; background: var(--bg3); border: 1px solid var(--border2);
+    border-radius: var(--radius-sm); padding: 8px 32px 8px 12px;
+    color: var(--text); font-family: 'Outfit', sans-serif; font-size: 13px; font-weight: 500;
+    outline: none; cursor: pointer; -webkit-appearance: none; appearance: none;
+    transition: border-color 0.2s;
+  }
+  .ctx-select-wrap select:focus { border-color: var(--accent); }
+  .ctx-select-wrap select.selected { border-color: rgba(79,156,249,0.4); }
+  .ctx-select-wrap::after {
+    content: ''; position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
+    width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent;
+    border-top: 5px solid var(--text3); pointer-events: none;
+  }
+
+  .btn-gestionar {
+    background: none; border: 1px dashed var(--border2); border-radius: var(--radius-sm);
+    color: var(--text3); font-size: 11px; font-family: 'Outfit', sans-serif; font-weight: 500;
+    padding: 6px 12px; cursor: pointer; white-space: nowrap;
+    transition: all 0.15s; flex-shrink: 0; align-self: flex-end;
+  }
+  .btn-gestionar:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-gestionar.active { border-color: var(--accent); color: var(--accent); background: var(--blue-bg); }
+
+  .context-badge-strip {
+    display: none; align-items: center; gap: 8px;
+    padding: 0 1.5rem 1rem; flex-wrap: wrap;
+  }
+  .context-badge-strip.show { display: flex; }
+
+  .ctx-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 500; padding: 4px 10px;
+    border-radius: 999px; letter-spacing: 0.02em;
+  }
+  .ctx-badge.usuario { background: var(--green-bg); color: var(--green); border: 1px solid rgba(5,150,105,0.2); }
+  .ctx-badge.evento  { background: var(--amber-bg); color: var(--amber); border: 1px solid rgba(217,119,6,0.2); }
+  .ctx-badge svg { width: 10px; height: 10px; }
+
+  /* Manage panel */
+  .manage-panel {
+    border-top: 1px solid var(--border); padding: 1.25rem 1.5rem;
+    display: none; animation: slideDown 0.2s ease;
+  }
+  .manage-panel.open { display: block; }
+
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .manage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+
+  .manage-col h4 {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--text3); margin-bottom: 10px;
+  }
+
+  .manage-items { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; min-height: 32px; }
+
+  .manage-item {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 10px; font-size: 13px;
+    animation: slideIn 0.15s ease;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(-6px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .manage-item span { flex: 1; }
+  .manage-item .item-email { font-size: 11px; color: var(--text3); font-family: 'DM Mono', monospace; }
+
+  .manage-item button {
+    background: none; border: none; color: var(--text3);
+    cursor: pointer; font-size: 13px; padding: 2px 4px;
+    border-radius: 4px; line-height: 1; transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .manage-item button:hover { color: var(--red); background: var(--red-bg); }
+
+  .manage-add { display: flex; gap: 6px; }
+  .manage-add input {
+    flex: 1; background: var(--bg3); border: 1px solid var(--border2);
+    border-radius: 6px; padding: 7px 10px; color: var(--text);
+    font-family: 'Outfit', sans-serif; font-size: 13px; outline: none;
+    transition: border-color 0.2s;
+  }
+  .manage-add input:focus { border-color: var(--accent); }
+  .manage-add input::placeholder { color: var(--text3); }
+  .manage-add button {
+    background: var(--blue-bg); border: 1px solid rgba(79,156,249,0.25);
+    border-radius: 6px; color: var(--accent); font-size: 18px; line-height: 1;
+    padding: 6px 12px; cursor: pointer; transition: all 0.15s; font-weight: 300;
+  }
+  .manage-add button:hover { background: rgba(79,156,249,0.15); }
+  .manage-add button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .manage-empty { font-size: 12px; color: var(--text3); font-style: italic; padding: 4px 0; }
+
+  /* Context required warning */
+  .ctx-required {
+    display: none; align-items: center; gap: 6px; font-size: 12px; color: var(--amber);
+    background: var(--amber-bg); border: 1px solid rgba(217,119,6,0.2);
+    border-radius: 6px; padding: 8px 12px; margin-bottom: 1rem;
+  }
+  .ctx-required.show { display: flex; }
+  .ctx-required svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+  /* ── Upload ── */
+  .upload-section { margin-bottom: 2rem; }
+
+  .drop-zone {
+    border: 1.5px dashed var(--border2); border-radius: 20px;
+    padding: 3rem 2rem; text-align: center; cursor: pointer;
+    transition: all 0.2s; background: var(--bg2); position: relative; overflow: hidden;
+  }
+  .drop-zone::before {
+    content: ''; position: absolute; inset: 0;
+    background: var(--accent-glow); opacity: 0; transition: opacity 0.2s;
+  }
+  .drop-zone:hover, .drop-zone.drag { border-color: var(--accent); }
+  .drop-zone:hover::before, .drop-zone.drag::before { opacity: 1; }
+
+  .drop-icon {
+    width: 56px; height: 56px; background: var(--blue-bg);
+    border: 1px solid rgba(79,156,249,0.2); border-radius: 16px;
+    display: flex; align-items: center; justify-content: center; margin: 0 auto 1.25rem;
+  }
+  .drop-icon svg { width: 24px; height: 24px; color: var(--accent); }
+  .drop-zone h3 { font-size: 16px; font-weight: 500; margin-bottom: 6px; }
+  .drop-zone p  { font-size: 13px; color: var(--text2); }
+  .drop-zone .formats { font-size: 11px; color: var(--text3); margin-top: 8px; font-family: 'DM Mono', monospace; letter-spacing: 0.05em; }
+  input[type=file] { display: none; }
+
+  /* Queue */
+  .queue { display: flex; flex-direction: column; gap: 8px; margin-top: 1rem; }
+
+  .file-card {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 12px 16px;
+    animation: slideIn 0.2s ease;
+  }
+
+  .file-type {
+    width: 36px; height: 36px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 500;
+    flex-shrink: 0; letter-spacing: 0.05em;
+  }
+  .file-type.pdf { background: var(--red-bg); color: var(--red); border: 1px solid rgba(220,38,38,0.2); }
+  .file-type.img { background: var(--blue-bg); color: var(--accent); border: 1px solid rgba(79,156,249,0.2); }
+
+  .file-info { flex: 1; min-width: 0; }
+  .file-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-meta { font-size: 11px; color: var(--text3); font-family: 'DM Mono', monospace; margin-top: 2px; }
+
+  .status-pill {
+    font-size: 11px; font-weight: 500; padding: 4px 10px;
+    border-radius: 999px; white-space: nowrap; letter-spacing: 0.02em;
+  }
+  .status-pill.pending    { background: var(--bg3); color: var(--text3); }
+  .status-pill.processing { background: var(--blue-bg); color: var(--accent); }
+  .status-pill.done       { background: var(--green-bg); color: var(--green); }
+  .status-pill.error      { background: var(--red-bg); color: var(--red); }
+
+  .file-remove {
+    background: none; border: none; color: var(--text3);
+    cursor: pointer; font-size: 16px; padding: 4px; line-height: 1;
+    transition: color 0.15s; flex-shrink: 0;
+  }
+  .file-remove:hover { color: var(--red); }
+
+  /* Progress */
+  .progress-bar-wrap {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 16px 20px; margin: 1rem 0; display: none;
+  }
+  .progress-bar-wrap.visible { display: block; }
+  .progress-info { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px; }
+  .progress-label { color: var(--text2); }
+  .progress-pct   { color: var(--accent); font-family: 'DM Mono', monospace; }
+  .progress-track { height: 4px; background: var(--bg3); border-radius: 2px; overflow: hidden; }
+  .progress-fill  { height: 100%; background: linear-gradient(90deg, var(--accent), #a78bfa); border-radius: 2px; transition: width 0.4s ease; width: 0%; }
+  .progress-log   { font-size: 11px; color: var(--text3); margin-top: 8px; font-family: 'DM Mono', monospace; }
+
+  /* Buttons */
+  .action-bar { display: flex; gap: 10px; margin: 1.5rem 0; flex-wrap: wrap; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 20px; border-radius: var(--radius-sm);
+    font-size: 14px; font-family: 'Outfit', sans-serif; font-weight: 500;
+    cursor: pointer; border: 1px solid var(--border2);
+    background: var(--bg2); color: var(--text); transition: all 0.15s;
+  }
+  .btn:hover { background: var(--bg3); }
+  .btn:active { transform: scale(0.98); }
+  .btn svg { width: 15px; height: 15px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #3b8ef0; border-color: #3b8ef0; }
+
+  .btn-success { background: var(--green-bg); border-color: rgba(5,150,105,0.3); color: var(--green); }
+  .btn-success:hover { background: rgba(5,150,105,0.15); }
+
+  .btn-danger { background: var(--red-bg); border-color: rgba(220,38,38,0.2); color: var(--red); font-size: 12px; padding: 8px 14px; }
+
+  /* Results */
+  .results-section { display: none; animation: fadeUp 0.3s ease; }
+  .results-section.visible { display: block; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px; }
+  .section-title  { display: flex; align-items: center; gap: 10px; }
+  .section-title h2 { font-size: 18px; font-weight: 600; }
+
+  .count-badge {
+    background: var(--blue-bg); border: 1px solid rgba(79,156,249,0.2);
+    color: var(--accent); font-size: 11px; font-family: 'DM Mono', monospace;
+    padding: 3px 10px; border-radius: 999px;
+  }
+
+  .sp-saved-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; color: var(--green); background: var(--green-bg);
+    border: 1px solid rgba(5,150,105,0.2); border-radius: 999px; padding: 3px 10px;
+  }
+  .sp-saved-badge svg { width: 10px; height: 10px; }
+
+  .table-container { background: var(--bg2); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+  .table-scroll { overflow-x: auto; }
+
+  table { width: 100%; border-collapse: collapse; min-width: 960px; }
+  thead { background: var(--bg3); }
+
+  th {
+    padding: 12px 16px; text-align: left;
+    font-size: 11px; font-weight: 600; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    white-space: nowrap; border-bottom: 1px solid var(--border);
+  }
+
+  td { padding: 14px 16px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tbody tr { transition: background 0.1s; }
+  tbody tr:hover td { background: rgba(0,0,0,0.015); }
+
+  .cell-mono   { font-family: 'DM Mono', monospace; font-size: 12px; }
+  .cell-amount { text-align: right; font-family: 'DM Mono', monospace; font-size: 13px; }
+  .cell-date   { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--text2); }
+  .cell-pago   { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--accent); }
+  .cell-desc   { max-width: 200px; white-space: normal; line-height: 1.4; font-size: 12px; color: var(--text2); }
+
+  .inv-num {
+    background: var(--blue-bg); border: 1px solid rgba(79,156,249,0.15);
+    color: var(--accent); font-family: 'DM Mono', monospace;
+    font-size: 11px; padding: 3px 8px; border-radius: 6px;
+    font-weight: 500; letter-spacing: 0.05em;
+  }
+
+  .del-row {
+    background: none; border: none; color: var(--text3);
+    cursor: pointer; font-size: 14px; padding: 4px 8px;
+    border-radius: 4px; transition: all 0.15s; opacity: 0;
+  }
+  tbody tr:hover .del-row { opacity: 1; }
+  .del-row:hover { color: var(--red); background: var(--red-bg); }
+
+  /* Totals */
+  .totals-strip { display: grid; grid-template-columns: repeat(3,1fr); gap: 1rem; margin-top: 1.5rem; }
+
+  .total-card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1.25rem 1.5rem; transition: border-color 0.2s;
+  }
+  .total-card:hover { border-color: var(--border2); }
+  .total-card label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); font-weight: 600; display: block; margin-bottom: 8px; }
+  .total-card .amount { font-family: 'DM Serif Display', serif; font-size: 1.75rem; color: var(--text); line-height: 1; }
+  .total-card.highlight { border-color: rgba(79,156,249,0.25); background: var(--blue-bg); }
+  .total-card.highlight .amount { color: var(--accent); }
+
+  /* Empty state */
+  .empty-state { text-align: center; padding: 4rem 2rem; color: var(--text3); }
+  .empty-state svg { width: 40px; height: 40px; margin: 0 auto 1rem; opacity: 0.4; display: block; }
+  .empty-state p { font-size: 14px; }
+
+  /* Login required overlay (over content) */
+  .login-wall {
+    text-align: center; padding: 3rem 2rem;
+    background: var(--bg2); border: 1px solid var(--border2);
+    border-radius: 20px; margin-bottom: 2rem;
+  }
+  .login-wall h3 { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+  .login-wall p  { font-size: 14px; color: var(--text2); margin-bottom: 1.5rem; }
+
+  footer { text-align: center; padding: 2rem 0; font-size: 12px; color: var(--text3); border-top: 1px solid var(--border); margin-top: 4rem; }
+
+  @media (max-width: 600px) {
+    .totals-strip { grid-template-columns: 1fr; }
+    .container { padding: 0 1rem 3rem; }
+    .hero h1 { font-size: 2rem; }
+    .manage-grid { grid-template-columns: 1fr; }
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner-ring"></div>
+  <div class="loading-msg" id="loadingMsg">Cargando...</div>
+</div>
+
+<!-- API Key Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h2>API Key de Claude</h2>
+    <p>Ingresa tu API Key de Anthropic para la extracción con IA. Se guarda solo en tu navegador.</p>
+    <label>Anthropic API Key</label>
+    <input type="password" id="apiKeyInput" placeholder="sk-ant-api03-..." autocomplete="off">
+    <p style="font-size:12px;color:var(--text3);margin-bottom:1.25rem;">
+      Obtén tu key en <a href="https://console.anthropic.com" target="_blank" style="color:var(--accent)">console.anthropic.com</a>
+    </p>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveApiKey()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Topbar -->
+  <nav class="topbar">
+    <div class="logo">
+      <img src="logo-md.jpg" alt="Magic Dreams" style="height:40px;width:auto;">
+    </div>
+    <div class="topbar-right">
+      <button class="api-toggle" onclick="openModal()" id="apiToggle">
+        <span class="dot" id="apiDot"></span>
+        <span id="apiStatus">Sin API Key</span>
+      </button>
+      <button class="btn-ms-login" id="loginBtn" onclick="signIn()">
+        <svg viewBox="0 0 21 21" fill="none">
+          <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
+          <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+          <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
+          <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+        </svg>
+        Iniciar sesión
+      </button>
+      <div class="user-chip" id="userChip">
+        <div class="user-avatar" id="userAvatar">?</div>
+        <span class="user-name" id="userNameDisplay"></span>
+        <button class="btn-signout" onclick="signOut()" title="Cerrar sesión">✕</button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <div class="hero">
+    <h1>Extractor de<br><em>Facturas con IA</em></h1>
+    <p>Sube tus facturas en PDF o imagen y extrae automáticamente todos los datos para exportarlos a Excel.</p>
+  </div>
+
+  <!-- SharePoint status banner -->
+  <div class="sp-banner" id="spBanner">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+    </svg>
+    <span id="spBannerMsg"></span>
+  </div>
+
+  <!-- Login wall (shown when not signed in) -->
+  <div class="login-wall" id="loginWall">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;margin:0 auto 1rem;display:block;color:var(--text3)">
+      <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+    <h3>Inicia sesión para continuar</h3>
+    <p>Usa tu cuenta corporativa de Magic Dreams para acceder a las listas y guardar las facturas en SharePoint.</p>
+    <button class="btn-ms-login" onclick="signIn()" style="display:inline-flex;margin:0 auto;">
+      <svg viewBox="0 0 21 21" fill="none" style="width:16px;height:16px">
+        <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
+        <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+        <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
+        <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+      </svg>
+      Iniciar sesión con Microsoft
+    </button>
+  </div>
+
+  <!-- Main content (hidden until signed in) -->
+  <div id="mainContent" style="display:none">
+
+    <!-- Context Section -->
+    <div class="context-section">
+      <div class="context-card">
+        <div class="context-main">
+          <div class="context-label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+            </svg>
+            Contexto
+          </div>
+          <div class="ctx-fields">
+            <div class="ctx-field">
+              <label>Usuario</label>
+              <div class="ctx-select-wrap">
+                <select id="selUsuario" onchange="onCtxChange()">
+                  <option value="">— Seleccionar usuario —</option>
+                </select>
+              </div>
+            </div>
+            <div class="ctx-field">
+              <label>Evento</label>
+              <div class="ctx-select-wrap">
+                <select id="selEvento" onchange="onCtxChange()">
+                  <option value="">— Seleccionar evento —</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <button class="btn-gestionar" id="btnGestionar" onclick="toggleManage()">
+            ⚙ Gestionar listas
+          </button>
+        </div>
+
+        <!-- Badge strip -->
+        <div class="context-badge-strip" id="ctxBadges">
+          <span style="font-size:11px;color:var(--text3);margin-right:4px">Sesión:</span>
+          <span class="ctx-badge usuario">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+            <span id="badgeUsuarioText">—</span>
+          </span>
+          <span style="font-size:11px;color:var(--text3)">·</span>
+          <span class="ctx-badge evento">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span id="badgeEventoText">—</span>
+          </span>
+        </div>
+
+        <!-- Manage panel -->
+        <div class="manage-panel" id="managePanel">
+          <div class="manage-grid">
+            <div class="manage-col">
+              <h4>Usuarios</h4>
+              <div class="manage-items" id="manageUsuarios"></div>
+              <div class="manage-add">
+                <input type="text" id="inputNuevoUsuario" placeholder="Nombre del usuario..." onkeydown="if(event.key==='Enter') addItem('usuarios')">
+                <button type="button" id="btnAddUsuario" onclick="addItem('usuarios')" title="Agregar">+</button>
+              </div>
+            </div>
+            <div class="manage-col">
+              <h4>Eventos</h4>
+              <div class="manage-items" id="manageEventos"></div>
+              <div class="manage-add">
+                <input type="text" id="inputNuevoEvento" placeholder="Nombre del evento..." onkeydown="if(event.key==='Enter') addItem('eventos')">
+                <button type="button" id="btnAddEvento" onclick="addItem('eventos')" title="Agregar">+</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Context required warning -->
+    <div class="ctx-required" id="ctxRequired">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      Selecciona un <strong style="margin:0 3px">usuario</strong> y un <strong style="margin:0 3px">evento</strong> antes de procesar.
+    </div>
+
+    <!-- Upload -->
+    <div class="upload-section">
+      <input type="file" id="fileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.webp">
+      <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+        <div class="drop-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+        </div>
+        <h3>Arrastra las facturas aquí</h3>
+        <p>o haz clic para seleccionar archivos</p>
+        <p class="formats">PDF · JPG · PNG · WEBP — Múltiples archivos</p>
+      </div>
+      <div class="queue" id="fileQueue"></div>
+      <div class="progress-bar-wrap" id="progressWrap">
+        <div class="progress-info">
+          <span class="progress-label" id="progressLabel">Procesando...</span>
+          <span class="progress-pct" id="progressPct">0%</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="progress-log" id="progressLog"></div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="action-bar">
+      <button class="btn btn-primary" id="processBtn" disabled onclick="processFiles()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Procesar facturas
+      </button>
+      <button class="btn" id="clearBtn" style="display:none" onclick="clearQueue()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+        Limpiar cola
+      </button>
+      <button class="btn btn-success" id="exportBtn" style="display:none" onclick="exportExcel()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Exportar a Excel
+      </button>
+      <button class="btn btn-danger" id="clearDataBtn" style="display:none" onclick="clearAll()">Borrar todo</button>
+    </div>
+
+    <!-- Results -->
+    <div class="results-section" id="resultsSection">
+      <div class="section-header">
+        <div class="section-title">
+          <h2>Facturas</h2>
+          <span class="count-badge" id="countBadge">0</span>
+          <span class="sp-saved-badge" id="spSavedBadge" style="display:none">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Guardadas en SharePoint
+          </span>
+        </div>
+        <span style="font-size:12px;color:var(--text3)">Ordenadas por fecha de emisión</span>
+      </div>
+      <div class="table-container">
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>N° Factura</th>
+                <th>Proveedor</th>
+                <th>RUC / DV</th>
+                <th>Descripción</th>
+                <th>Fecha emisión</th>
+                <th>Fecha pago (+30d)</th>
+                <th style="text-align:right">Subtotal</th>
+                <th style="text-align:right">ITBMS</th>
+                <th style="text-align:right">Total</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="tableBody">
+              <tr><td colspan="10"><div class="empty-state">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <p>Las facturas procesadas aparecerán aquí</p>
+              </div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="totals-strip" id="totalsStrip" style="display:none">
+        <div class="total-card"><label>Subtotal total</label><div class="amount" id="totSubtotal">B/. 0.00</div></div>
+        <div class="total-card"><label>ITBMS total</label><div class="amount" id="totItbms">B/. 0.00</div></div>
+        <div class="total-card highlight"><label>Gran total</label><div class="amount" id="totTotal">B/. 0.00</div></div>
+      </div>
+    </div>
+
+  </div><!-- /mainContent -->
+</div>
+
+<footer>Magic Dreams Productions &mdash; Extractor de Facturas &mdash; Powered by Claude AI</footer>
+
+<script>
+// ─── Microsoft / SharePoint Config ───────────────────────────
+const CLIENT_ID  = '98448243-b90b-4d0d-b4ff-5de3d53a4b21';
+const TENANT_ID  = 'edda77ef-4597-420f-9ff2-b8aea7631a04';
+const SP_HOST    = 'magicdreamspty.sharepoint.com';
+const SP_PATH    = '/sites/RegistrodeFacturas';
+const GRAPH      = 'https://graph.microsoft.com/v1.0';
+const SCOPES     = ['User.Read', 'https://graph.microsoft.com/Sites.ReadWrite.All'];
+
+const msalConfig = {
+  auth: {
+    clientId: CLIENT_ID,
+    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+    redirectUri: (location.protocol === 'file:') ? 'http://localhost:8080/facturas-magicdreams.html' : (window.location.origin + window.location.pathname),
+    navigateToLoginRequestUrl: false
+  },
+  cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: false }
+};
+
+// ─── State ───────────────────────────────────────────────────
+let msalInstance;
+let currentAccount = null;
+let spSiteId       = null;
+let listUsuarios   = [];   // [{id, name}, ...]
+let listEventos    = [];   // [{id, name}, ...]
+let invoices       = [];
+let fileQueue      = [];
+let isProcessing   = false;
+let managePanelOpen= false;
+
+// ─── DOM refs ────────────────────────────────────────────────
+const selUsuario       = document.getElementById('selUsuario');
+const selEvento        = document.getElementById('selEvento');
+const elManageUsuarios = document.getElementById('manageUsuarios');
+const elManageEventos  = document.getElementById('manageEventos');
+const dropZone         = document.getElementById('dropZone');
+const fileInput        = document.getElementById('fileInput');
+const queueEl          = document.getElementById('fileQueue');
+const processBtn       = document.getElementById('processBtn');
+const clearBtn         = document.getElementById('clearBtn');
+const exportBtn        = document.getElementById('exportBtn');
+const clearDataBtn     = document.getElementById('clearDataBtn');
+const resultsSection   = document.getElementById('resultsSection');
+const tableBody        = document.getElementById('tableBody');
+const progressWrap     = document.getElementById('progressWrap');
+const progressFill     = document.getElementById('progressFill');
+const progressLabel    = document.getElementById('progressLabel');
+const progressPct      = document.getElementById('progressPct');
+const progressLog      = document.getElementById('progressLog');
+const ctxRequired      = document.getElementById('ctxRequired');
+
+// ─── Loading helpers ─────────────────────────────────────────
+function showLoading(msg) {
+  document.getElementById('loadingMsg').textContent = msg || 'Cargando...';
+  document.getElementById('loadingOverlay').classList.add('show');
+}
+function hideLoading() {
+  document.getElementById('loadingOverlay').classList.remove('show');
+}
+
+function showBanner(msg, type = 'error') {
+  const el = document.getElementById('spBanner');
+  el.className = `sp-banner show ${type}`;
+  document.getElementById('spBannerMsg').textContent = msg;
+  if (type === 'info') setTimeout(() => el.classList.remove('show'), 4000);
+}
+function hideBanner() { document.getElementById('spBanner').classList.remove('show'); }
+
+// ─── Auth ────────────────────────────────────────────────────
+async function initAuth() {
+  try {
+    msalInstance = new msal.PublicClientApplication(msalConfig);
+    await msalInstance.initialize();
+    const response = await msalInstance.handleRedirectPromise();
+    if (response) currentAccount = response.account;
+    else {
+      const accounts = msalInstance.getAllAccounts();
+      if (accounts.length > 0) currentAccount = accounts[0];
+    }
+    updateAuthUI();
+    if (currentAccount) await onSignedIn();
+  } catch (e) {
+    console.error('Auth init error:', e);
+    showBanner('Error al inicializar Microsoft Auth: ' + e.message);
+  }
+}
+
+async function signIn() {
+  try {
+    showLoading('Iniciando sesión...');
+    const result = await msalInstance.loginPopup({ scopes: SCOPES, prompt: 'select_account' });
+    currentAccount = result.account;
+    updateAuthUI();
+    await onSignedIn();
+  } catch (e) {
+    if (e.errorCode !== 'user_cancelled') showBanner('Error al iniciar sesión: ' + (e.message || e));
+  } finally {
+    hideLoading();
+  }
+}
+
+function signOut() {
+  msalInstance.logoutPopup({ account: currentAccount }).then(() => {
+    currentAccount = null;
+    spSiteId = null;
+    listUsuarios = []; listEventos = []; invoices = [];
+    updateAuthUI();
+    hideBanner();
+  });
+}
+
+async function getToken() {
+  if (!currentAccount) throw new Error('No hay sesión activa');
+  try {
+    const r = await msalInstance.acquireTokenSilent({ scopes: SCOPES, account: currentAccount });
+    return r.accessToken;
+  } catch {
+    const r = await msalInstance.acquireTokenPopup({ scopes: SCOPES, account: currentAccount });
+    return r.accessToken;
+  }
+}
+
+function updateAuthUI() {
+  const loginBtn  = document.getElementById('loginBtn');
+  const userChip  = document.getElementById('userChip');
+  const loginWall = document.getElementById('loginWall');
+  const mainContent = document.getElementById('mainContent');
+
+  if (currentAccount) {
+    loginBtn.style.display  = 'none';
+    userChip.style.display  = 'flex';
+    loginWall.style.display = 'none';
+    mainContent.style.display = 'block';
+    const name = currentAccount.name || currentAccount.username;
+    document.getElementById('userNameDisplay').textContent = name;
+    document.getElementById('userAvatar').textContent = name.charAt(0).toUpperCase();
+  } else {
+    loginBtn.style.display  = 'inline-flex';
+    userChip.style.display  = 'none';
+    loginWall.style.display = 'block';
+    mainContent.style.display = 'none';
+  }
+}
+
+async function onSignedIn() {
+  showLoading('Cargando listas de SharePoint...');
+  try {
+    await loadAllLists();
+    // Pre-seleccionar usuario logueado si está en la lista
+    const myName = currentAccount.name;
+    const match = listUsuarios.find(u => u.name === myName);
+    if (match) {
+      selUsuario.value = myName;
+      selUsuario.classList.add('selected');
+      onCtxChange();
+    }
+    showBanner('Conectado a SharePoint · ' + SP_HOST + SP_PATH, 'info');
+  } catch (e) {
+    showBanner('Error conectando SharePoint: ' + e.message + ' — Verifica permisos y que las listas existan.');
+  } finally {
+    hideLoading();
+  }
+}
+
+// ─── Graph API helpers ────────────────────────────────────────
+async function graphFetch(url, opts = {}) {
+  const token = await getToken();
+  const resp = await fetch(GRAPH + url, {
+    ...opts,
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(opts.headers || {})
+    }
+  });
+  if (resp.status === 204) return null;
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data?.error?.message || `HTTP ${resp.status}`);
+  return data;
+}
+
+const graphGet    = url       => graphFetch(url);
+const graphPost   = (url, b)  => graphFetch(url, { method: 'POST',   body: JSON.stringify(b) });
+const graphDelete = url       => graphFetch(url, { method: 'DELETE' });
+
+// ─── SharePoint helpers ───────────────────────────────────────
+async function getSiteId() {
+  if (spSiteId) return spSiteId;
+  const data = await graphGet(`/sites/${SP_HOST}:${SP_PATH}`);
+  spSiteId = data.id;
+  return spSiteId;
+}
+
+async function spGetItems(listName) {
+  const sid = await getSiteId();
+  const data = await graphGet(`/sites/${sid}/lists/${encodeURIComponent(listName)}/items?expand=fields&$top=999`);
+  return data.value || [];
+}
+
+async function spAddItem(listName, fields) {
+  const sid = await getSiteId();
+  return graphPost(`/sites/${sid}/lists/${encodeURIComponent(listName)}/items`, { fields });
+}
+
+async function spDeleteItem(listName, itemId) {
+  const sid = await getSiteId();
+  return graphDelete(`/sites/${sid}/lists/${encodeURIComponent(listName)}/items/${itemId}`);
+}
+
+// ─── Load lists ───────────────────────────────────────────────
+async function loadAllLists() {
+  const [usuarios, eventos] = await Promise.all([
+    spGetItems('Usuarios'),
+    spGetItems('Eventos')
+  ]);
+  listUsuarios = usuarios.map(i => ({ id: i.id, name: i.fields.Title }));
+  listEventos  = eventos.map(i  => ({ id: i.id, name: i.fields.Title }));
+  refreshSelects();
+  if (managePanelOpen) { renderManageList('usuarios'); renderManageList('eventos'); }
+}
+
+// ─── List management (SharePoint) ────────────────────────────
+function renderManageList(key) {
+  const items = key === 'usuarios' ? listUsuarios : listEventos;
+  const el    = key === 'usuarios' ? elManageUsuarios : elManageEventos;
+  const label = key === 'usuarios' ? 'usuarios' : 'eventos';
+
+  if (!items.length) {
+    el.innerHTML = `<div class="manage-empty">Sin ${label} aún. Agrega uno abajo.</div>`;
+    return;
+  }
+  el.innerHTML = items.map(item => `
+    <div class="manage-item">
+      <span>${item.name}</span>
+      <button type="button" onclick="removeItem('${key}','${item.id}')" title="Eliminar">✕</button>
+    </div>`).join('');
+}
+
+function populateSelect(selectEl, names, placeholder) {
+  const current = selectEl.value;
+  selectEl.innerHTML = `<option value="">${placeholder}</option>`;
+  names.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    selectEl.appendChild(opt);
+  });
+  if (current && names.includes(current)) selectEl.value = current;
+  selectEl.classList.toggle('selected', !!selectEl.value);
+}
+
+function refreshSelects() {
+  populateSelect(selUsuario, listUsuarios.map(u => u.name), '— Seleccionar usuario —');
+  populateSelect(selEvento,  listEventos.map(e => e.name),  '— Seleccionar evento —');
+}
+
+async function addItem(key) {
+  const inputEl = document.getElementById(key === 'usuarios' ? 'inputNuevoUsuario' : 'inputNuevoEvento');
+  const btnEl   = document.getElementById(key === 'usuarios' ? 'btnAddUsuario' : 'btnAddEvento');
+  const val = inputEl.value.trim();
+  if (!val) return;
+  const list = key === 'usuarios' ? listUsuarios : listEventos;
+  if (list.find(i => i.name.toLowerCase() === val.toLowerCase())) { inputEl.value = ''; return; }
+
+  btnEl.disabled = true;
+  try {
+    const listName = key === 'usuarios' ? 'Usuarios' : 'Eventos';
+    const result   = await spAddItem(listName, { Title: val });
+    list.push({ id: result.id, name: val });
+    inputEl.value = '';
+    renderManageList(key);
+    refreshSelects();
+  } catch (e) {
+    showBanner('Error al agregar: ' + e.message);
+  } finally {
+    btnEl.disabled = false;
+  }
+}
+
+async function removeItem(key, itemId) {
+  const list    = key === 'usuarios' ? listUsuarios : listEventos;
+  const item    = list.find(i => i.id === itemId);
+  const listName = key === 'usuarios' ? 'Usuarios' : 'Eventos';
+
+  try {
+    await spDeleteItem(listName, itemId);
+    const idx = list.findIndex(i => i.id === itemId);
+    if (idx !== -1) list.splice(idx, 1);
+    renderManageList(key);
+    refreshSelects();
+    const sel = key === 'usuarios' ? selUsuario : selEvento;
+    if (item && sel.value === item.name) { sel.value = ''; onCtxChange(); }
+  } catch (e) {
+    showBanner('Error al eliminar: ' + e.message);
+  }
+}
+
+function toggleManage() {
+  managePanelOpen = !managePanelOpen;
+  document.getElementById('managePanel').classList.toggle('open', managePanelOpen);
+  document.getElementById('btnGestionar').classList.toggle('active', managePanelOpen);
+  if (managePanelOpen) { renderManageList('usuarios'); renderManageList('eventos'); }
+}
+
+function onCtxChange() {
+  const u = selUsuario.value, e = selEvento.value;
+  selUsuario.classList.toggle('selected', !!u);
+  selEvento.classList.toggle('selected', !!e);
+  const badges = document.getElementById('ctxBadges');
+  if (u && e) {
+    document.getElementById('badgeUsuarioText').textContent = u;
+    document.getElementById('badgeEventoText').textContent  = e;
+    badges.classList.add('show');
+  } else {
+    badges.classList.remove('show');
+  }
+  ctxRequired.classList.remove('show');
+  syncButtons();
+}
+
+// ─── Drag & Drop ─────────────────────────────────────────────
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('drag'); addFiles(e.dataTransfer.files); });
+fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value = ''; });
+
+function addFiles(files) {
+  Array.from(files).forEach(f => {
+    if (fileQueue.find(q => q.file.name === f.name && q.file.size === f.size)) return;
+    fileQueue.push({ id: Date.now() + Math.random(), file: f, status: 'pending' });
+  });
+  renderQueue(); syncButtons();
+}
+
+function renderQueue() {
+  if (!fileQueue.length) { queueEl.innerHTML = ''; return; }
+  queueEl.innerHTML = fileQueue.map(item => {
+    const ext = item.file.name.split('.').pop().toUpperCase();
+    const size = item.file.size < 1024*1024
+      ? (item.file.size/1024).toFixed(0)+' KB'
+      : (item.file.size/1024/1024).toFixed(1)+' MB';
+    const labels = { pending: 'Pendiente', processing: '⟳ Procesando...', done: '✓ Listo', error: '✕ Error' };
+    const removeBtn = item.status !== 'processing'
+      ? `<button class="file-remove" onclick="removeFile('${item.id}')" title="Quitar">✕</button>` : '';
+    return `<div class="file-card" id="fcard-${item.id}">
+      <div class="file-type ${ext==='PDF'?'pdf':'img'}">${ext}</div>
+      <div class="file-info">
+        <div class="file-name">${item.file.name}</div>
+        <div class="file-meta">${size}</div>
+      </div>
+      <span class="status-pill ${item.status}">${labels[item.status]}</span>
+      ${removeBtn}
+    </div>`;
+  }).join('');
+}
+
+function removeFile(id) { fileQueue = fileQueue.filter(f => String(f.id) !== String(id)); renderQueue(); syncButtons(); }
+function clearQueue()    { if (!isProcessing) { fileQueue = []; renderQueue(); syncButtons(); } }
+
+function syncButtons() {
+  const pending = fileQueue.filter(f => f.status === 'pending').length;
+  processBtn.disabled = pending === 0;
+  clearBtn.style.display = fileQueue.length > 0 ? 'inline-flex' : 'none';
+}
+
+// ─── Processing ───────────────────────────────────────────────
+async function processFiles() {
+  if (!selUsuario.value || !selEvento.value) {
+    ctxRequired.classList.add('show');
+    document.querySelector('.context-section').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  const apiKey = getApiKey();
+  if (!apiKey) { openModal(); return; }
+
+  const pending = fileQueue.filter(f => f.status === 'pending');
+  if (!pending.length) return;
+
+  isProcessing = true;
+  processBtn.disabled = true;
+  progressWrap.classList.add('visible');
+  ctxRequired.classList.remove('show');
+  hideBanner();
+  let savedCount = 0;
+
+  for (let i = 0; i < pending.length; i++) {
+    const item = pending[i];
+    item.status = 'processing';
+    renderQueue();
+    setProgress(Math.round((i / pending.length) * 100), `Procesando ${i+1} de ${pending.length}`, item.file.name);
+    try {
+      const data = await extractInvoice(item.file, apiKey);
+      item.status = 'done';
+      invoices.push(data);
+      // Guardar en SharePoint
+      try {
+        await saveInvoiceToSP(data);
+        savedCount++;
+      } catch (spErr) {
+        console.warn('SP save error:', spErr.message);
+      }
+    } catch (e) {
+      item.status = 'error';
+      progressLog.textContent = `Error: ${e.message}`;
+    }
+    renderQueue();
+  }
+
+  setProgress(100, 'Completado', `${invoices.length} factura(s) extraída(s)`);
+  isProcessing = false;
+  syncButtons();
+  sortAndRender();
+
+  if (invoices.length > 0) {
+    resultsSection.classList.add('visible');
+    exportBtn.style.display = 'inline-flex';
+    clearDataBtn.style.display = 'inline-flex';
+    if (savedCount > 0) document.getElementById('spSavedBadge').style.display = 'inline-flex';
+    resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function setProgress(pct, label, log) {
+  progressFill.style.width = pct + '%';
+  progressLabel.textContent = label;
+  progressPct.textContent   = pct + '%';
+  if (log) progressLog.textContent = log;
+}
+
+// ─── Save invoice to SharePoint ───────────────────────────────
+async function saveInvoiceToSP(inv) {
+  await spAddItem('Facturas', {
+    Title:        inv.numero_factura || 'Sin número',
+    Proveedor:    inv.proveedor      || '',
+    RucDv:        inv.ruc_dv         || '',
+    Descripcion:  inv.descripcion    || '',
+    FechaEmision: inv.fecha_emision  || '',
+    FechaPago:    inv.fecha_pago      || '',
+    Subtotal:     parseFloat(inv.subtotal) || 0,
+    Itbms:        parseFloat(inv.itbms)    || 0,
+    Total:        parseFloat(inv.total)    || 0,
+    Usuario:      selUsuario.value,
+    Evento:       selEvento.value,
+    FechaRegistro: new Date().toISOString()
+  });
+}
+
+// ─── Claude AI extraction ─────────────────────────────────────
+async function fileToBase64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(',')[1]);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+async function extractInvoice(file, apiKey) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const base64 = await fileToBase64(file);
+  const mediaTypeMap = { pdf:'application/pdf', png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', webp:'image/webp' };
+  const mediaType = mediaTypeMap[ext] || 'image/jpeg';
+
+  const contentBlock = ext === 'pdf'
+    ? { type: 'document', source: { type: 'base64', media_type: mediaType, data: base64 } }
+    : { type: 'image',    source: { type: 'base64', media_type: mediaType, data: base64 } };
+
+  const prompt = `Eres un extractor especializado de facturas panameñas. Analiza esta factura y responde ÚNICAMENTE con un objeto JSON válido (sin backticks, sin texto extra):
+{
+  "numero_factura": "los últimos 4 dígitos del número de factura como string",
+  "proveedor": "nombre completo del proveedor o empresa emisora",
+  "ruc_dv": "RUC completo con DV, ejemplo: 8-123-45678 DV 12",
+  "descripcion": "descripción clara y concisa de los servicios o productos facturados",
+  "fecha_emision": "fecha en formato DD/MM/YYYY",
+  "subtotal": 0.00,
+  "itbms": 0.00,
+  "total": 0.00
+}
+Reglas: si el campo no aparece usa null para texto y 0 para montos. Montos sin símbolo de moneda.`;
+
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: [contentBlock, { type: 'text', text: prompt }] }]
+    })
+  });
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error?.message || `Error HTTP ${resp.status}`);
+  }
+  const result = await resp.json();
+  const text   = result.content.find(b => b.type === 'text')?.text || '';
+  const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+  parsed._sortDate = parseDate(parsed.fecha_emision);
+  parsed.fecha_pago = addDays(parsed.fecha_emision, 30);
+  parsed._id = Date.now() + Math.random();
+  return parsed;
+}
+
+// ─── Date utils ───────────────────────────────────────────────
+function parseDate(str) {
+  if (!str) return new Date(0);
+  const [d, m, y] = str.split('/');
+  return new Date(+y, +m-1, +d);
+}
+function addDays(str, days) {
+  if (!str) return null;
+  const [d, m, y] = str.split('/');
+  const dt = new Date(+y, +m-1, +d);
+  if (isNaN(dt)) return null;
+  dt.setDate(dt.getDate() + days);
+  return dt.toLocaleDateString('es-PA', { day:'2-digit', month:'2-digit', year:'numeric' });
+}
+
+// ─── Render table ─────────────────────────────────────────────
+function sortAndRender() {
+  invoices.sort((a, b) => (a._sortDate||0) - (b._sortDate||0));
+  document.getElementById('countBadge').textContent = invoices.length;
+  if (!invoices.length) {
+    tableBody.innerHTML = `<tr><td colspan="10"><div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      <p>Las facturas procesadas aparecerán aquí</p>
+    </div></td></tr>`;
+    document.getElementById('totalsStrip').style.display = 'none';
+    return;
+  }
+  tableBody.innerHTML = invoices.map((inv, i) => `
+    <tr>
+      <td><span class="inv-num">${inv.numero_factura||'—'}</span></td>
+      <td style="font-size:13px;max-width:140px;white-space:normal;line-height:1.3">${inv.proveedor||'—'}</td>
+      <td class="cell-mono">${inv.ruc_dv||'—'}</td>
+      <td class="cell-desc">${inv.descripcion||'—'}</td>
+      <td class="cell-date">${inv.fecha_emision||'—'}</td>
+      <td class="cell-pago">${inv.fecha_pago||'—'}</td>
+      <td class="cell-amount">B/. ${fmt(inv.subtotal)}</td>
+      <td class="cell-amount">B/. ${fmt(inv.itbms)}</td>
+      <td class="cell-amount" style="font-weight:600">B/. ${fmt(inv.total)}</td>
+      <td><button class="del-row" onclick="deleteRow(${i})" title="Eliminar">✕</button></td>
+    </tr>`).join('');
+
+  const totSub = invoices.reduce((s,i) => s+(+i.subtotal||0), 0);
+  const totItb = invoices.reduce((s,i) => s+(+i.itbms||0),    0);
+  const totTot = invoices.reduce((s,i) => s+(+i.total||0),    0);
+  document.getElementById('totSubtotal').textContent = 'B/. '+fmt(totSub);
+  document.getElementById('totItbms').textContent    = 'B/. '+fmt(totItb);
+  document.getElementById('totTotal').textContent    = 'B/. '+fmt(totTot);
+  document.getElementById('totalsStrip').style.display = 'grid';
+}
+
+function fmt(n) { return parseFloat(n||0).toLocaleString('es-PA',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+function deleteRow(i) {
+  invoices.splice(i, 1); sortAndRender();
+  if (!invoices.length) { exportBtn.style.display='none'; clearDataBtn.style.display='none'; document.getElementById('spSavedBadge').style.display='none'; }
+}
+function clearAll() {
+  if (!confirm('¿Borrar todas las facturas de la tabla?')) return;
+  invoices = []; sortAndRender();
+  exportBtn.style.display='none'; clearDataBtn.style.display='none';
+  document.getElementById('spSavedBadge').style.display='none';
+}
+
+// ─── Export Excel ─────────────────────────────────────────────
+function exportExcel() {
+  if (!invoices.length) return;
+  const usuario = selUsuario.value || 'Sin especificar';
+  const evento  = selEvento.value  || 'Sin especificar';
+  const wb = XLSX.utils.book_new();
+  const headers = ['N° Factura','Proveedor','RUC / DV','Descripción','Fecha Emisión','Fecha Pago','Subtotal (B/.)','ITBMS (B/.)','Total (B/.)'];
+  const rows = invoices.map(inv => [
+    inv.numero_factura||'', inv.proveedor||'', inv.ruc_dv||'', inv.descripcion||'',
+    inv.fecha_emision||'', inv.fecha_pago||'',
+    +inv.subtotal||0, +inv.itbms||0, +inv.total||0
+  ]);
+  const n = rows.length + 4;
+  const totRow = ['','','','','','TOTALES',{f:`SUM(G5:G${n})`},{f:`SUM(H5:H${n})`},{f:`SUM(I5:I${n})`}];
+  const ws = XLSX.utils.aoa_to_sheet([
+    [`Usuario: ${usuario}`,'','','','','','','',''],
+    [`Evento: ${evento}`,  '','','','','','','',''],
+    [],
+    headers, ...rows, totRow
+  ]);
+  ws['!cols'] = [{wch:12},{wch:30},{wch:22},{wch:42},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14}];
+  const moneyFmt = '"B/."#,##0.00';
+  for (let r = 5; r <= rows.length+5; r++) {
+    ['G','H','I'].forEach(col => { const c = ws[`${col}${r}`]; if (c) c.z = moneyFmt; });
+  }
+  XLSX.utils.book_append_sheet(wb, ws, 'Facturas');
+  XLSX.writeFile(wb, `Facturas_${evento.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+// ─── API Key ─────────────────────────────────────────────────
+function getApiKey()  { return localStorage.getItem('pt_apikey') || ''; }
+function saveApiKey() {
+  const val = document.getElementById('apiKeyInput').value.trim();
+  if (!val) return alert('Ingresa una API key válida.');
+  localStorage.setItem('pt_apikey', val);
+  updateApiKeyUI(); closeModal();
+}
+function updateApiKeyUI() {
+  const key = getApiKey();
+  document.getElementById('apiDot').classList.toggle('connected', !!key);
+  document.getElementById('apiStatus').textContent = key ? 'API conectada' : 'Sin API Key';
+}
+function openModal()  { document.getElementById('apiKeyInput').value = getApiKey(); document.getElementById('modalOverlay').classList.add('open'); }
+function closeModal() { document.getElementById('modalOverlay').classList.remove('open'); }
+document.getElementById('modalOverlay').addEventListener('click', e => { if (e.target===e.currentTarget) closeModal(); });
+
+// ─── Init ─────────────────────────────────────────────────────
+updateApiKeyUI();
+initAuth();
+</script>
+</body>
+</html>
